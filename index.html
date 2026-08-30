@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#4f6ef7">
+<title>我的生活工作台</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="生活工作台">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%234f6ef7'/><text x='50' y='68' font-size='52' text-anchor='middle' fill='white'>台</text></svg>">
+<link rel="stylesheet" href="style.css">
+<script>try{var _d=JSON.parse(localStorage.getItem("wb_workbench_v1")||"{}");if(_d.settings&&_d.settings.theme==="dark")document.documentElement.setAttribute("data-theme","dark");}catch(e){}</script>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+<div id="app">
+  <!-- 侧边栏（PC） -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="mark">台</div>
+      <div><div class="t1">生活工作台</div><div class="t2">手机 · PC 数据串联</div></div>
+    </div>
+    <nav id="nav"></nav>
+  </aside>
+
+  <!-- 主区域 -->
+  <main class="main">
+    <div class="topbar">
+      <div>
+        <h1 id="page-title">总览</h1>
+        <div class="date" id="page-date"></div>
+      </div>
+      <button class="top-icon" onclick="openSearch()" title="全局搜索">🔍</button>
+      <button class="top-icon" id="theme-btn" onclick="toggleTheme()" title="切换深色/浅色">🌙</button>
+      <button class="dl-btn" id="dl-btn" onclick="openDownloadModal()">📲 下载</button>
+      <button class="sync-chip" id="sync-chip" onclick="go('settings')">
+        <span class="dot"></span><span id="sync-chip-text">未开启云同步</span>
+      </button>
+    </div>
+    <div id="backup-banner" class="backup-banner" style="display:none"></div>
+    <div id="update-banner" class="backup-banner" style="display:none;background:#e7f0ff;border-color:#3b6fd4;color:#1c3f7a">
+      <span>🆕 发现新版本，建议刷新以更新</span>
+      <button class="btn sm" style="background:#3b6fd4;color:#fff;border:none" onclick="applyUpdate()">立即更新</button>
+      <button class="icon-btn" onclick="this.parentNode.style.display='none'">✕</button>
+    </div>
+    <div id="corrupt-banner" class="corrupt-banner" style="display:none"></div>
+
+    <section id="sec-dashboard" class="section"></section>
+    <section id="sec-todo" class="section"></section>
+    <section id="sec-schedule" class="section"></section>
+    <section id="sec-calendar" class="section"></section>
+    <section id="sec-diet" class="section"></section>
+    <section id="sec-money" class="section"></section>
+    <section id="sec-travel" class="section"></section>
+    <section id="sec-hot" class="section"></section>
+    <section id="sec-wellness" class="section"></section>
+    <section id="sec-tarot" class="section"></section>
+    <section id="sec-tao" class="section"></section>
+    <section id="sec-study" class="section"></section>
+    <section id="sec-plan" class="section"></section>
+    <section id="sec-review" class="section"></section>
+    <section id="sec-stats" class="section"></section>
+    <section id="sec-weight" class="section"></section>
+    <section id="sec-kitchen" class="section"></section>
+    <section id="sec-sop" class="section"></section>
+    <section id="sec-shopping" class="section"></section>
+    <section id="sec-habits" class="section"></section>
+    <section id="sec-files" class="section"></section>
+    <section id="sec-vault" class="section"></section>
+    <section id="sec-tools" class="section"></section>
+    <section id="sec-xhs" class="section"></section>
+    <section id="sec-settings" class="section"></section>
+    <section id="sec-fitness" class="section"></section>
+  </main>
+
+  <!-- 底部导航（手机） -->
+  <nav class="bottom-nav" id="bnav"></nav>
+</div>
+
+<button id="fab" class="fab" onclick="openQuickAdd()" title="快速记录">＋</button>
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script src="foods.js"></script>
+<script src="recipes.js"></script>
+<script src="travel.js"></script>
+<script src="xhs.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
