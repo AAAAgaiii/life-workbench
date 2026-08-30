@@ -32,7 +32,7 @@ echo ---- 2/5 暂存文件 ----
 "%GIT%" add -A
 
 echo ---- 3/5 提交 ----
-"%GIT%" commit -m "deploy: v24 dashboard-fix + fitness + liuren + PWA"
+"%GIT%" diff --cached --quiet || "%GIT%" commit -m "deploy: v24 dashboard-fix + fitness + liuren + PWA"
 
 echo ---- 4/5 切换到 main 分支 ----
 "%GIT%" branch -M main
