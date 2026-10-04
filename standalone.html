@@ -2033,6 +2033,11 @@ function xhsCatName(id) {
 }
 function xhsSeedIfEmpty() {
   xhsEnsure();
+  // 示例数据只播种一次（持久标记，随云同步走）。否则"全选删光"会立刻触发重新播种，
+  // 31 条示例以新 id 复活，看起来像"删除被云同步撤销"（2026-10-05 修复）。
+  if (D.settings.xhsSeeded) return;
+  // 老用户已有数据但尚无标记：补标记即可，不再播种
+  if (D.xhsNotes.length || D.xhsCats.length) { D.settings.xhsSeeded = true; save(true); return; }
   if (!D.xhsCats.length && XHS_SEED.cats.length) {
     D.xhsCats = XHS_SEED.cats.map((c) => ({ id: c.id, name: c.name }));
   }
@@ -2052,6 +2057,7 @@ function xhsSeedIfEmpty() {
       created: now - i * 1000,
       updatedAt: now - i * 1000,
     }));
+    D.settings.xhsSeeded = true;
     save(true);
   }
 }
