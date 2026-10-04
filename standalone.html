@@ -837,6 +837,7 @@ body.compact .btn { padding: 7px 12px; }
     <section id="sec-calendar" class="section"></section>
     <section id="sec-diet" class="section"></section>
     <section id="sec-money" class="section"></section>
+    <section id="sec-assets" class="section"></section>
     <section id="sec-travel" class="section"></section>
     <section id="sec-hot" class="section"></section>
     <section id="sec-wellness" class="section"></section>
@@ -855,6 +856,8 @@ body.compact .btn { padding: 7px 12px; }
     <section id="sec-vault" class="section"></section>
     <section id="sec-tools" class="section"></section>
     <section id="sec-xhs" class="section"></section>
+    <section id="sec-goals" class="section"></section>
+    <section id="sec-bookmarks" class="section"></section>
     <section id="sec-settings" class="section"></section>
     <section id="sec-fitness" class="section"></section>
   </main>
@@ -2664,6 +2667,9 @@ const defaultData = () => ({
   moneyBudgets: {}, // 月预算 {"2026-07": 3000}
   fixedExpenses: [],// 固定支出模板 {id, cat, amount, note}
   billTemplates: [], // 手动记账识别模板 {name, header, roles, catMap, mode}
+  assets: [],      // 资产/净值 {id, name, type:"现金"|"卡"|"理财"|"负债"|"其他", value, note}
+  goals: [],       // 目标/OKR {id, title, period:"年"|"季"|"月", target, progress, note, children:[{id,text,done}]}
+  bookmarks: [],   // 收藏/稍后读 {id, title, url, note, tag, created}
   recurringBills: [], // 周期性账单 {id, cat, amount, note, cycle:'month'|'week'|'day'|'year', anchor, lastRun}
   amortItems: [],   // 周期性产品摊销 {id, name, cat, amount, buyDate, dur, unit:'day'|'week'|'month'|'year', note, created, updatedAt}
   aiMemory: [],     // AI 对话记忆 {ts, kind, text}
@@ -3092,6 +3098,7 @@ const PAGES = [
   { id: "fitness", name: "健身系统", ico: "💪" },
   { id: "kitchen", name: "美食台", ico: "🍳" },
   { id: "money", name: "记账", ico: "💰" },
+  { id: "assets", name: "资产/净值", ico: "📈" },
   { id: "travel", name: "旅行计划", ico: "✈️" },
   { id: "xhs", name: "小红书库", ico: "📕" },
   { id: "hot", name: "当日热点", ico: "🔥" },
@@ -3108,6 +3115,8 @@ const PAGES = [
   { id: "files", name: "文件归档", ico: "📂" },
   { id: "vault", name: "隐私保险箱", ico: "🔐" },
   { id: "tools", name: "小工具", ico: "🛠️" },
+  { id: "goals", name: "目标/OKR", ico: "🎯" },
+  { id: "bookmarks", name: "收藏/稍后读", ico: "🔖" },
   { id: "settings", name: "设置/同步", ico: "⚙️" },
 ];
 let cur = "dashboard";
@@ -3365,6 +3374,7 @@ function renderDashboard() {
     <h3>⏳ 倒数日 / 纪念日 <button class="more" onclick="go('schedule')">管理 ›</button></h3>
     ${dashboardCountdownHtml()}
   </div>
+  ${budgetDashCard()}
   ${xhsDashboardCard()}
   <div class="empty" style="grid-column:1/-1;font-size:12px;color:var(--text2)">💡 提示：按住任意卡片可拖动，自由调整仪表盘顺序（自动保存）。</div>`;
   applyDashOrder();
@@ -3968,7 +3978,7 @@ function catBudgetStatusHtml() {
   const ms = moneyMonth;
   const budgets = (D.settings.catBudgets && D.settings.catBudgets[ms]) || {};
   const keys = Object.keys(budgets);
-  if (!keys.length) return "";
+  if (!keys.length) return `<div class="card" style="margin-bottom:16px"><h3>📂 分类预算执行</h3><div class="empty">还没设分类预算 <button class="more" onclick="openCatBudgetModal()">设分类预算</button></div></div>`;
   const adj = moneyView === "amort" ? amortAdjust(ms) : null;
   const list = keys.map((c) => {
     const b = budgets[c];
@@ -3983,7 +3993,7 @@ function catBudgetStatusHtml() {
     </div>`;
   }).join("");
   return `<div class="card" style="margin-bottom:16px">
-    <h3>📂 分类预算执行 <span class="more" onclick="go('settings')">去设置 ›</span></h3>
+    <h3>📂 分类预算执行 <span class="more" onclick="openCatBudgetModal()">设分类预算</span></h3>
     ${list}</div>`;
 }
 /* ---- 年度趋势 ---- */
@@ -7564,6 +7574,10 @@ function openAiReceipt() {
   if (!aiReady()) { toast("请先在设置配置 AI 接口"); showSetupGuide("ai"); return; }
   openModal(`<h3>🤖 AI 识票</h3><p class="tool-sub">粘贴小票文字或截图 OCR 结果，AI 自动拆成记账条目。</p>
     <textarea id="receipt-text" rows="6" class="inp" placeholder="例如：&#10;7-01 午餐 牛肉面 28&#10;7-01 打车 19.5"></textarea>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <label class="btn" style="flex:1;text-align:center;cursor:pointer">📷 上传小票图<input id="receipt-img" type="file" accept="image/*" style="display:none" onchange="receiptImgPreview()"></label>
+      <button class="btn" style="flex:1" onclick="runAiReceiptImg()">🤖 图片识别</button>
+    </div>
     <button class="btn" style="margin-top:10px;width:100%" onclick="runAiReceipt()">🔍 AI 识别并预览</button>
     <div id="receipt-preview" class="tool-result"></div>`);
 }
@@ -7649,7 +7663,207 @@ const RENDER = {
   travel: renderTravel,
   xhs: renderXhs,
   fitness: renderFitness,
+  assets: renderAssets, goals: renderGoals, bookmarks: renderBookmarks,
 };
+
+/* ===== 新增模块：资产/净值、目标/OKR、收藏/稍后读、分类预算设置 ===== */
+let bmFilter = "";
+const ASSET_TYPES = ["现金", "卡", "理财", "负债", "其他"];
+function netWorth() {
+  const a = D.assets || [];
+  const asset = a.filter(x => x.type !== "负债").reduce((s, x) => s + (+x.value || 0), 0);
+  const debt = a.filter(x => x.type === "负债").reduce((s, x) => s + (+x.value || 0), 0);
+  return { asset, debt, net: asset - debt };
+}
+function renderAssets() {
+  const a = D.assets || [];
+  const groups = {}; ASSET_TYPES.forEach(t => groups[t] = []);
+  a.forEach(x => (groups[x.type] || (groups[x.type] = [])).push(x));
+  const sum = (t) => (groups[t] || []).reduce((s, x) => s + (+x.value || 0), 0);
+  const nw = netWorth();
+  const stat = (title, val, col) => `<div class="card stat"><div class="v" style="color:${col}">${fmtMoney(val)}</div><div class="l">${title}</div></div>`;
+  const listHtml = (t) => (groups[t] || []).map(x => `<div class="list-item">
+    <div class="grow"><div class="title">${esc(x.name)}</div>${x.note ? `<div class="sub">${esc(x.note)}</div>` : ""}</div>
+    <b style="color:${t === "负债" ? "var(--red)" : "var(--green)"}">${t === "负债" ? "−" : "+"}${fmtMoney(x.value)}</b>
+    <button class="icon-btn" onclick="delAsset('${x.id}')">✕</button></div>`).join("") || '<div class="empty">暂无</div>';
+  $("#sec-assets").innerHTML = `
+  <div class="grid cols-4" style="margin-bottom:16px">
+    ${stat("净资产", nw.net, nw.net >= 0 ? "var(--primary)" : "var(--red)")}
+    ${stat("总资产", nw.asset, "var(--green)")}
+    ${stat("总负债", nw.debt, "var(--red)")}
+    ${stat("条目数", a.length, "var(--text2)")}
+  </div>
+  <div class="card" style="margin-bottom:16px">
+    <h3>添加资产 / 负债</h3>
+    <div class="form-row" style="margin-top:8px">
+      <input id="as-name" placeholder="名称，如：招商银行卡 / 花呗 / 余额宝" style="flex:2">
+      <select id="as-type">${ASSET_TYPES.map(t => `<option>${t}</option>`).join("")}</select>
+      <input id="as-value" type="number" placeholder="金额" min="0" step="0.01" style="flex:1">
+      <input id="as-note" placeholder="备注(可选)" style="flex:1.5">
+      <button class="btn" onclick="addAsset()">添加</button>
+    </div>
+  </div>
+  ${ASSET_TYPES.map(t => `<div class="card" style="margin-bottom:16px"><h3>${t === "负债" ? "负债" : "资产"} ${t} <span style="color:var(--text2);font-weight:400">${fmtMoney(sum(t))}</span></h3>${listHtml(t)}</div>`).join("")}
+  `;
+}
+function addAsset() {
+  const name = $("#as-name").value.trim(); if (!name) return toast("请输入名称");
+  const value = parseFloat($("#as-value").value); if (!isFinite(value) || value <= 0) return toast("请输入金额");
+  D.assets = D.assets || [];
+  D.assets.push({ id: uid(), name, type: $("#as-type").value, value: Math.round(value * 100) / 100, note: $("#as-note").value.trim() });
+  save(); renderAssets(); toast("已添加");
+}
+function delAsset(id) { if (!appConfirm("删除该条目？")) return; D.assets = (D.assets || []).filter(x => x.id !== id); save(); renderAssets(); }
+
+/* ---- 目标 / OKR ---- */
+const GOAL_PERIODS = ["年", "季", "月"];
+function renderGoals() {
+  const list = D.goals || [];
+  const byP = {}; GOAL_PERIODS.forEach(p => byP[p] = []);
+  list.forEach(g => (byP[g.period] || (byP[g.period] = [])).push(g));
+  const childHtml = (g) => (g.children || []).map(c => `<div class="list-item" style="padding:4px 0;border:none">
+    <button class="checkbox ${c.done ? "on" : ""}" onclick="toggleGoalChild('${g.id}','${c.id}')">${c.done ? "✓" : ""}</button>
+    <div class="grow" style="font-size:13px">${esc(c.text)}</div></div>`).join("") || '<div class="empty" style="font-size:12px">暂无子任务</div>';
+  const itemHtml = (g) => `<div class="card" style="margin-bottom:14px">
+    <div style="display:flex;justify-content:space-between;align-items:center"><div class="title" style="font-weight:600">${esc(g.title)}</div><button class="icon-btn" onclick="delGoal('${g.id}')">✕</button></div>
+    <div class="sub" style="margin:4px 0 8px">${g.period}目标${g.target ? " · 目标：" + esc(g.target) : ""}</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div class="pbar" style="flex:1"><div style="width:${Math.min(100, g.progress || 0)}%;background:var(--primary)"></div></div>
+      <span style="font-size:12px;color:var(--text2)">${g.progress || 0}%</span>
+      <input type="range" min="0" max="100" value="${g.progress || 0}" onchange="setGoalProgress('${g.id}',this.value)" style="width:90px">
+    </div>
+    ${g.note ? `<div class="sub" style="white-space:pre-wrap;margin-bottom:8px">${esc(g.note)}</div>` : ""}
+    <div style="margin:4px 0 8px">${childHtml(g)}</div>
+    <div class="form-row"><input id="gc-${g.id}" placeholder="添加子任务" style="flex:1"><button class="btn sm" onclick="addGoalChild('${g.id}')">+子任务</button></div>
+  </div>`;
+  $("#sec-goals").innerHTML = `
+  <div class="card" style="margin-bottom:16px">
+    <h3>新建目标</h3>
+    <div class="form-row" style="margin-top:8px">
+      <input id="g-title" placeholder="目标标题，如：2026 攒下 5 万" style="flex:2">
+      <select id="g-period">${GOAL_PERIODS.map(p => `<option>${p}</option>`).join("")}</select>
+      <input id="g-target" placeholder="量化目标(可选)" style="flex:1.5">
+      <button class="btn" onclick="addGoal()">创建</button>
+    </div>
+  </div>
+  ${GOAL_PERIODS.map(p => `<div class="card" style="margin-bottom:16px"><h3>${p}目标（${byP[p].length}）</h3>${byP[p].length ? byP[p].map(itemHtml).join("") : '<div class="empty">暂无</div>'}</div>`).join("")}
+  `;
+}
+function addGoal() {
+  const title = $("#g-title").value.trim(); if (!title) return toast("请输入目标");
+  D.goals = D.goals || [];
+  D.goals.push({ id: uid(), title, period: $("#g-period").value, target: $("#g-target").value.trim(), progress: 0, note: "", children: [] });
+  save(); renderGoals(); toast("已创建");
+}
+function delGoal(id) { if (!appConfirm("删除该目标？")) return; D.goals = (D.goals || []).filter(g => g.id !== id); save(); renderGoals(); }
+function setGoalProgress(id, v) { const g = (D.goals || []).find(x => x.id === id); if (g) { g.progress = +v; save(); } }
+function addGoalChild(id) {
+  const g = (D.goals || []).find(x => x.id === id); if (!g) return;
+  const t = $("#gc-" + id).value.trim(); if (!t) return toast("请输入子任务");
+  g.children = g.children || []; g.children.push({ id: uid(), text: t, done: false });
+  $("#gc-" + id).value = ""; save(); renderGoals();
+}
+function toggleGoalChild(id, cid) {
+  const g = (D.goals || []).find(x => x.id === id); if (!g) return;
+  const c = (g.children || []).find(x => x.id === cid); if (c) { c.done = !c.done; save(); renderGoals(); }
+}
+
+/* ---- 收藏 / 稍后读 ---- */
+function renderBookmarks() {
+  const list = D.bookmarks || [];
+  const tags = [...new Set(list.map(b => b.tag).filter(Boolean))];
+  const shown = bmFilter ? list.filter(b => b.tag === bmFilter) : list;
+  const itemHtml = (b) => `<div class="list-item">
+    <div class="grow"><div class="title" style="cursor:pointer" onclick="openBookmark('${b.id}')">${esc(b.title) || esc(b.url)}</div>
+      <div class="sub">${b.tag ? `<span class="tag">${esc(b.tag)}</span> ` : ""}${b.note ? esc(b.note) : ""}${b.created ? " · " + b.created : ""}</div></div>
+    <button class="icon-btn" onclick="copyText('${esc(b.url)}')" title="复制链接">复制</button>
+    <button class="icon-btn" onclick="delBookmark('${b.id}')">✕</button></div>`;
+  $("#sec-bookmarks").innerHTML = `
+  <div class="card" style="margin-bottom:16px">
+    <h3>添加收藏</h3>
+    <div class="form-row" style="margin-top:8px">
+      <input id="bm-title" placeholder="标题(可选)" style="flex:1.5">
+      <input id="bm-url" placeholder="链接 URL" style="flex:2">
+      <input id="bm-tag" placeholder="标签(可选)" style="flex:1">
+      <input id="bm-note" placeholder="备注(可选)" style="flex:1">
+      <button class="btn" onclick="addBookmark()">收藏</button>
+    </div>
+  </div>
+  ${tags.length ? `<div style="margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap">${["", ...tags].map(t => `<button class="btn sm ${bmFilter === t ? "" : "ghost"}" onclick="bmFilterSet('${t}')">${t ? esc(t) : "全部"}</button>`).join("")}</div>` : ""}
+  <div class="card">${shown.length ? shown.slice().reverse().map(itemHtml).join("") : '<div class="empty">还没有收藏，看到好内容就收进来</div>'}</div>
+  `;
+}
+function addBookmark() {
+  const url = $("#bm-url").value.trim(); if (!url) return toast("请输入链接");
+  const u = safeUrl(url); if (!u) return toast("链接不合法");
+  D.bookmarks = D.bookmarks || [];
+  D.bookmarks.push({ id: uid(), title: $("#bm-title").value.trim(), url: u, note: $("#bm-note").value.trim(), tag: $("#bm-tag").value.trim(), created: todayStr() });
+  save(); renderBookmarks(); toast("已收藏");
+}
+function delBookmark(id) { if (!appConfirm("删除该收藏？")) return; D.bookmarks = (D.bookmarks || []).filter(b => b.id !== id); save(); renderBookmarks(); }
+function openBookmark(id) { const b = (D.bookmarks || []).find(x => x.id === id); if (b && b.url) window.open(b.url, "_blank", "noopener"); }
+function bmFilterSet(t) { bmFilter = t; renderBookmarks(); }
+
+/* ---- 分类预算设置 + 总览预算卡 ---- */
+function openCatBudgetModal() {
+  const ms = moneyMonth;
+  const cats = MONEY_CATS["支出"];
+  const cur = (D.settings.catBudgets && D.settings.catBudgets[ms]) || {};
+  openModal(`<h3>设置 ${ms.slice(5)}月 分类预算</h3>
+    <div style="text-align:left;max-height:50vh;overflow:auto">
+    ${cats.map(c => `<div class="form-row" style="margin-bottom:8px"><span style="flex:0 1 80px;font-size:13px">${c}</span><input id="cb-${c}" type="number" placeholder="预算金额" min="0" step="0.01" value="${cur[c] || ""}"></div>`).join("")}
+    </div>
+    <button class="btn" style="margin-top:10px;width:100%" onclick="setCatBudgets()">保存分类预算</button>`);
+}
+function setCatBudgets() {
+  const ms = moneyMonth; const obj = {};
+  MONEY_CATS["支出"].forEach(c => { const v = parseFloat($("#cb-" + c).value); if (isFinite(v) && v > 0) obj[c] = v; });
+  D.settings.catBudgets = D.settings.catBudgets || {};
+  D.settings.catBudgets[ms] = obj; save(); closeModal(); renderMoney(); toast("已保存分类预算");
+}
+function budgetDashCard() {
+  const ms = moneyMonth;
+  const b = D.moneyBudgets[ms] || 0;
+  const exp = D.money.filter(x => x.type === "支出" && moneyCounted(x) && x.date.startsWith(ms)).reduce((a, x) => a + x.amount, 0);
+  if (!b) return `<div class="card span2" data-dash="budget"><h3>本月预算 <button class="more" onclick="go('money')">去设</button></h3><div class="empty">还没设 ${ms.slice(5)} 月预算</div></div>`;
+  const pct = Math.min(100, Math.round(exp / b * 100));
+  const over = exp > b;
+  const cats = (D.settings.catBudgets && D.settings.catBudgets[ms]) || {};
+  const catLine = Object.keys(cats).slice(0, 3).map(c => {
+    const sp = D.money.filter(x => x.type === "支出" && x.cat === c && moneyCounted(x) && x.date.startsWith(ms)).reduce((a, x) => a + x.amount, 0);
+    return c + " " + fmtMoney(sp) + "/" + fmtMoney(cats[c]);
+  }).join("，");
+  return `<div class="card span2" data-dash="budget"><h3>本月预算执行 <button class="more" onclick="go('money')">详情</button></h3>
+    <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><span>已用 <b style="color:${over ? "var(--red)" : "var(--text)"}">${fmtMoney(exp)}</b> / ${fmtMoney(b)}（${pct}%）</span><span style="color:${over ? "var(--red)" : "var(--green)"}">${over ? "超支 " + fmtMoney(exp - b) : "剩 " + fmtMoney(b - exp)}</span></div>
+    <div class="pbar" style="height:10px"><div style="width:${pct}%;background:${over ? "var(--red)" : pct > 80 ? "var(--orange)" : "var(--green)"}"></div></div>
+    ${catLine ? `<div style="margin-top:8px;font-size:12px;color:var(--text2)">分类预算：${catLine}${Object.keys(cats).length > 3 ? "…" : ""}</div>` : ""}
+  </div>`;
+}
+
+/* ---- AI 识票：图片 OCR 通道（复用 confirmBillImport 导入） ---- */
+let _receiptImgData = null;
+function receiptImgPreview() {
+  const f = $("#receipt-img").files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { _receiptImgData = r.result; $("#receipt-preview").innerHTML = `<img src="${_receiptImgData}" style="max-width:100%;max-height:220px;border-radius:8px;margin-top:8px">`; };
+  r.readAsDataURL(f);
+}
+async function runAiReceiptImg() {
+  if (!_receiptImgData) return toast("请先选择小票图片");
+  toast("AI 识别中…");
+  const prompt = "这是一张小票/账单截图，请 OCR 并提取消费条目，返回 JSON 数组，每条：{\"date\":\"YYYY-MM-DD\",\"type\":\"out\",\"cat\":\"分类\",\"amount\":数字,\"note\":\"备注\"}。只返回 JSON 数组，不要解释。";
+  const messages = [{ role: "user", content: [ { type: "text", text: prompt }, { type: "image_url", image_url: { url: _receiptImgData } } ] }];
+  let res; try { res = await aiChat(messages); } catch (e) { return toast("AI 调用失败"); }
+  let items; try { items = JSON.parse(res.replace(/```json|```/g, "").trim()); } catch (e) { return toast("AI 返回无法解析，请检查配置"); }
+  if (!Array.isArray(items) || !items.length) return toast("未识别到条目");
+  const out = items.map((it) => ({ id: uid(), date: ("" + (it.date || todayStr())).replace(/\//g, "-"), type: it.type === "in" ? "in" : "out", cat: it.cat || "其他", amount: Math.abs(+it.amount || 0), note: it.note || "" }));
+  out.forEach((o) => { if (/^\d{1,2}-\d{1,2}$/.test(o.date)) o.date = new Date().getFullYear() + "-" + o.date; });
+  D._billPreview = out;
+  $("#receipt-preview").innerHTML = `<div style="text-align:left;max-height:200px;overflow:auto">${out.map((o) => `<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)">${o.date} · ${o.type === "in" ? "收入" : "支出"} · ${esc(o.cat)} · ¥${o.amount} ${o.note ? "· " + esc(o.note) : ""}</div>`).join("")}</div>
+    <button class="btn" style="margin-top:10px;width:100%" onclick="confirmBillImport()">✅ 确认导入 ${out.length} 条</button>`;
+  toast("识别完成");
+}
+
 
 function renderFitness() {
   const ext = "fitness/fit/index.html";
