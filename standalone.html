@@ -2663,6 +2663,7 @@ const defaultData = () => ({
   travelHabits: [], // 个人旅行习惯 {id, text, from, date}
   moneyBudgets: {}, // 月预算 {"2026-07": 3000}
   fixedExpenses: [],// 固定支出模板 {id, cat, amount, note}
+  billTemplates: [], // 手动记账识别模板 {name, header, roles, catMap, mode}
   recurringBills: [], // 周期性账单 {id, cat, amount, note, cycle:'month'|'week'|'day'|'year', anchor, lastRun}
   amortItems: [],   // 周期性产品摊销 {id, name, cat, amount, buyDate, dur, unit:'day'|'week'|'month'|'year', note, created, updatedAt}
   aiMemory: [],     // AI 对话记忆 {ts, kind, text}
@@ -7347,49 +7348,218 @@ function exportLifeReport() {
 
 /* ================= 账单 CSV 导入 / AI 识票 ================= */
 function openBillImport() {
-  openModal(`<h3>📥 导入账单 CSV</h3><p class="tool-sub">粘贴支付宝/微信/银行流水（首行表头），自动识别 日期/收支/分类/金额/备注。无表头则按 日期,收支,分类,金额,备注。</p>
-    <textarea id="bill-csv" rows="8" class="inp" placeholder="日期,收支,分类,金额,备注&#10;2026-07-01,支出,餐饮,32.5,午饭"></textarea>
-    <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" onclick="parseBillCsv()">解析预览</button>
-    <button class="btn ghost" onclick="$('#bill-file').click()">选择文件</button></div>
-    <input type="file" id="bill-file" accept=".csv,.txt" style="display:none" onchange="billFileRead(this)">
-    <div id="bill-preview" class="tool-result"></div>`);
+  const tpls = (D.billTemplates || []);
+  const tplSel = tpls.length ? `<div style="display:flex;gap:8px;margin-bottom:8px"><select id="bill-tpl" class="inp" onchange="applyBillTpl(this.value)"><option value="">— 套用已存识别模板 —</option>${tpls.map((t,i)=>`<option value="${i}">${esc(t.name)}</option>`).join("")}</select></div>` : "";
+  openModal(`<h3>📥 识别并导入手动记账表</h3>
+  <p class="tool-sub">支持你这种「一行多项 / 多列金额」的手动记账（如租房花销表）：粘贴或上传 CSV/TSV，自动识别 日期 / 收支 / 分类 / 金额 / 备注 各列；多列金额可<b>拆成多条</b>（用列名当分类）或<b>合并求和</b>。识别方式可存成模板，下次一键复用。</p>
+  ${tplSel}
+  <textarea id="bill-csv" rows="7" class="inp" placeholder="日期,午饭,晚饭,其他,备注&#10;2026-06-21,13,22.41,30.24,晾衣杆+水+地铁"></textarea>
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <button class="btn" onclick="parseBillCsv()">解析并识别列</button>
+    <button class="btn ghost" onclick="$('#bill-file').click()">选择文件</button>
+    <select id="bill-mode" class="inp" style="flex:0 1 210px" title="多列金额的处理方式">
+      <option value="split">多列金额 → 拆成多条</option>
+      <option value="sum">多列金额 → 合并为一条</option>
+    </select>
+    <input type="date" id="bill-defdate" class="inp" style="flex:0 1 175px" title="缺日期的行使用此默认日期">
+  </div>
+  <input type="file" id="bill-file" accept=".csv,.txt,.tsv" style="display:none" onchange="billFileRead(this)">
+  <div id="bill-map" class="tool-result"></div>
+  <div id="bill-preview" class="tool-result"></div>`);
 }
 function billFileRead(inp) { const f = inp.files[0]; if (!f) return; const rd = new FileReader(); rd.onload = () => { const ta = $("#bill-csv"); if (ta) ta.value = rd.result; parseBillCsv(); }; rd.readAsText(f); }
-function _splitCsvLine(line) { const delim = line.includes("\t") ? "\t" : (line.includes(";") ? ";" : ","); return line.split(delim).map((s) => s.trim()); }
-function parseBillCsv() {
-  const raw = $("#bill-csv").value.trim(); if (!raw) return toast("请粘贴或选择 CSV");
-  const lines = raw.split(/\r?\n/).filter(Boolean); if (!lines.length) return toast("无内容");
-  const head = _splitCsvLine(lines[0]);
-  const isHeader = /日期|date|收支|type|分类|cat|金额|amount|备注|note|商户|merchant/i.test(lines[0]);
-  let idx = { date: 0, type: 1, cat: 2, amount: 3, note: 4 };
-  let dataLines = lines;
-  if (isHeader) {
-    const find = (names) => { const i = head.findIndex((h) => names.some((n) => ("" + h).toLowerCase().includes(n))); return i < 0 ? -1 : i; };
-    const di = find(["日期", "date"]), ti = find(["收支", "type", "收入", "支出"]), ci = find(["分类", "cat", "类别"]), ai = find(["金额", "amount", "数额"]), ni = find(["备注", "note", "说明", "摘要", "商户", "merchant"]);
-    idx = { date: di < 0 ? 0 : di, type: ti < 0 ? 1 : ti, cat: ci < 0 ? 2 : ci, amount: ai < 0 ? 3 : ai, note: ni < 0 ? 4 : ni };
-    dataLines = lines.slice(1);
+function _splitCsvLine(line) {
+  let delim = ",";
+  if (line.includes("\t")) delim = "\t";
+  else if (line.includes(";")) delim = ";";
+  else if (line.includes("，")) delim = "，";
+  return line.split(delim).map((s) => s.trim());
+}
+function _p2(n) { return ("" + n).padStart(2, "0"); }
+function _billNormDate(raw) {
+  raw = ("" + (raw || "")).trim(); if (!raw) return "";
+  const s = raw.replace(/[，,\/]/g, ".").replace(/\s/g, "");
+  let m = s.match(/^(\d{4})\.(\d{1,2})\.(\d{1,2})$/);
+  if (m) return `${m[1]}-${_p2(m[2])}-${_p2(m[3])}`;
+  m = s.match(/^(\d{1,2})\.(\d{1,})$/);
+  if (m) { const mo = +m[1]; const da = Math.round((+s - mo) * 100); if (da >= 1 && da <= 31) return `${new Date().getFullYear()}-${_p2(mo)}-${_p2(da)}`; }
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(s)) return s;
+  if (/^\d{1,2}-\d{1,2}$/.test(s)) return `${new Date().getFullYear()}-${s}`;
+  return "";
+}
+const BILL_ROLE_KW = {
+  date: ["日期","时间","年月日","号","date","time","day"],
+  type: ["收支","类型","收/支","进出","收入支出","type","方向","in/out"],
+  cat: ["分类","类别","类目","项目","物品","商品","名称","科目","用途","cat","category","item","name"],
+  amount: ["金额","数额","价钱","花费","费用","支出额","收入额","实付","付款","金额(元)","amount","money","price","cost","fee","sum","total","付费"],
+  note: ["备注","说明","摘要","描述","商户","用途说明","note","remark","desc","memo","merchant"]
+};
+const BILL_TOTAL_KW = ["合计","总计","小计","汇总","今日花费","total","sum"];
+function _billRoleOf(header) {
+  const h = ("" + (header || "")).toLowerCase();
+  for (const role of ["date","type","cat","amount","note"]) {
+    if (BILL_ROLE_KW[role].some((k) => h.includes(k.toLowerCase()))) return role;
   }
+  return null;
+}
+function _billIsNum(v) { const s = ("" + (v == null ? "" : v)).replace(/[^\d.\-]/g, ""); return s !== "" && !isNaN(Number(s)) && isFinite(Number(s)); }
+function _billNormCat(raw, type) {
+  raw = ("" + (raw || "")).trim();
+  if (!raw) return "其他";
+  const cats = [].concat(MONEY_CATS["支出"] || [], MONEY_CATS["收入"] || []);
+  if (cats.includes(raw)) return raw;
+  const map = [["餐饮","餐饮|饭|吃|餐|食|午饭|晚饭|早餐|夜宵|瑞幸|咖啡|菜"],["交通","交通|地铁|公交|打车|滴滴|车|油|通勤|高铁|火车|机票|停车"],["购物","购物|买|购|物|杂|超市|淘宝|京东|拼多多|日用|用品|前置"],["居住","租|押金|钥匙|物业|水电|电费|水费|用电|燃气|煤气|住宿|房|家居|家电|家具|锅|刀|洗衣|清洁|抹布|洗洁"],["娱乐","娱乐|玩|电影|游戏|会员|充值"],["医疗","医|药|医院|诊所|保健|口腔"],["学习","学|书|课|培训|资料|考试"],["健身","健身|练|运动|器材"],["其他","其他|杂费|货拉|搬|充电"]];
+  for (const [c, re] of map) if (new RegExp(re).test(raw)) return c;
+  return raw.length <= 6 ? raw : "其他";
+}
+function _billTypeOf(cat, typeCol) {
+  if (typeCol && /收|in|收入|正|工资|兼职|红包|理财/.test(typeCol)) return "收入";
+  if (MONEY_CATS["收入"] && MONEY_CATS["收入"].includes(cat) && !(MONEY_CATS["支出"] || []).includes(cat)) return "收入";
+  return "支出";
+}
+function _billParseToCols() {
+  const raw = $("#bill-csv").value.trim(); if (!raw) { toast("请粘贴或选择 CSV"); return null; }
+  const lines = raw.split(/\r?\n/).filter(Boolean); if (!lines.length) { toast("无内容"); return null; }
+  const head = _splitCsvLine(lines[0]);
+  const isHeader = head.length >= 2 && /日期|date|收支|type|分类|cat|金额|amount|备注|note|商户|merchant|午饭|晚饭|花费|项目|物品|名称|时间/i.test(lines[0]);
+  const dataLines = isHeader ? lines.slice(1) : lines;
+  const n = head.length;
+  const roles = new Array(n).fill(null);
+  const used = {};
+  for (let i = 0; i < n; i++) {
+    const h = ("" + head[i]).toLowerCase();
+    if (BILL_TOTAL_KW.some((k) => h.includes(k.toLowerCase()))) continue;
+    const r = _billRoleOf(head[i]);
+    if (r && !(r in used)) { roles[i] = r; used[r] = i; }
+  }
+  for (let i = 0; i < n; i++) {
+    if (roles[i]) continue;
+    if (BILL_TOTAL_KW.some((k) => ("" + head[i]).toLowerCase().includes(k.toLowerCase()))) continue;
+    if (dataLines.length && _billIsNum(_splitCsvLine(dataLines[0])[i])) roles[i] = "金额";
+  }
+  if (!roles.includes("日期") && n > 0) roles[0] = "日期";
+  D._billHead = head;
+  return { head, isHeader, dataLines, roles, n };
+}
+function parseBillCsv() {
+  const p = _billParseToCols(); if (!p) return;
+  const { head, n } = p;
+  let roles = p.roles.slice();
+  if (D._billRoles && D._billRoles.length === n) { for (let i = 0; i < n; i++) if (D._billRoles[i] && D._billRoles[i] !== "忽略") roles[i] = D._billRoles[i]; }
+  if (!D._billCatMap) D._billCatMap = {};
+  for (let i = 0; i < n; i++) if (roles[i] === "金额" && !D._billCatMap[i]) D._billCatMap[i] = _billNormCat(head[i], "支出");
+  D._billRoles = roles.map((r) => r || "忽略");
+  const allCats = [].concat(MONEY_CATS["支出"] || [], MONEY_CATS["收入"] || []);
+  const roleOpts = (cur) => ["忽略","日期","收支","分类","金额","备注"].map((r) => `<option ${r === cur ? "selected" : ""}>${r}</option>`).join("");
+  const mapHtml = head.map((h, i) => `
+    <div style="display:flex;gap:6px;align-items:center;margin:4px 0;font-size:12px">
+      <span style="flex:0 0 130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(h)}">${esc(h) || "（空）"}</span>
+      <select class="inp sm" style="flex:0 0 92px" onchange="D._billRoles[${i}]=this.value;if(this.value==='金额'&&!D._billCatMap[${i}])D._billCatMap[${i}]=_billNormCat('${esc(h)}','支出');renderBillMapCats()">${roleOpts(roles[i] || "忽略")}</select>
+      <span id="bill-catwrap-${i}"></span>
+    </div>`).join("");
+  $("#bill-map").innerHTML = `<div style="margin-top:10px"><div style="font-size:12px;color:var(--text2);margin-bottom:4px">识别到 ${n} 列，请确认每列含义（金额列可指定归入哪个分类）：</div>${mapHtml}
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+      <button class="btn sm" onclick="renderBillPreview()">预览条目</button>
+      <input id="bill-tpl-name" class="inp sm" style="flex:1;min-width:120px" placeholder="模板名，如：租房花销表">
+      <button class="btn ghost sm" onclick="saveBillTpl()">💾 存为识别模板</button>
+    </div></div>`;
+  renderBillMapCats();
+  renderBillPreview();
+}
+function renderBillMapCats() {
+  const roles = D._billRoles || [];
+  const allCats = [].concat(MONEY_CATS["支出"] || [], MONEY_CATS["收入"] || []);
+  for (let i = 0; i < roles.length; i++) {
+    const el = $("#bill-catwrap-" + i); if (!el) continue;
+    if (roles[i] === "金额") {
+      const cur = D._billCatMap[i] || "其他";
+      el.innerHTML = `<select class="inp sm" style="flex:0 0 120px" onchange="D._billCatMap[${i}]=this.value">${allCats.map((c) => `<option ${c === cur ? "selected" : ""}>${c}</option>`).join("")}</select>`;
+    } else el.innerHTML = "";
+  }
+}
+function _billBuildEntries() {
+  const raw = $("#bill-csv").value.trim(); if (!raw) return [];
+  const p = _billParseToCols(); if (!p) return [];
+  const { dataLines, n } = p;
+  const head = D._billHead || p.head;
+  const roles = (D._billRoles && D._billRoles.length === n) ? D._billRoles : p.roles.map((r) => r || "忽略");
+  const mode = ($("#bill-mode") && $("#bill-mode").value) || "split";
   const out = [];
   dataLines.forEach((ln) => {
-    const c = _splitCsvLine(ln); if (c.length < 2) return;
-    let date = (c[idx.date] || "").replace(/\//g, "-");
-    if (/^\d{1,2}-\d{1,2}$/.test(date)) date = new Date().getFullYear() + "-" + date;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return;
-    const type = /收|in|收入|正/.test(c[idx.type]) ? "in" : "out";
-    const amount = parseFloat(String(c[idx.amount]).replace(/[^\d.\-]/g, "")); if (!isFinite(amount)) return;
-    const cat = c[idx.cat] || (type === "in" ? "收入" : "其他");
-    const note = c[idx.note] || "";
-    out.push({ id: uid(), date, type, cat, amount: Math.round(Math.abs(amount) * 100) / 100, note });
+    const c = _splitCsvLine(ln);
+    const di = roles.indexOf("日期"); let date = _billNormDate((di >= 0 ? c[di] : "") || "");
+    if (!date) { const dd = ($("#bill-defdate") && $("#bill-defdate").value) || ""; if (dd) date = dd; }
+    if (!date) return;
+    const ti = roles.indexOf("收支"); const typeCol = ti >= 0 ? c[ti] : "";
+    const ni = roles.indexOf("备注"); const noteCol = ni >= 0 ? c[ni] : "";
+    const ci = roles.indexOf("分类"); const catCol = ci >= 0 ? c[ci] : "";
+    const amtIdxs = []; for (let i = 0; i < n; i++) if (roles[i] === "金额") amtIdxs.push(i);
+    if (!amtIdxs.length) return;
+    if (mode === "sum") {
+      let sum = 0; amtIdxs.forEach((i) => { const a = parseFloat(String(c[i] || "").replace(/[^\d.\-]/g, "")); if (isFinite(a)) sum += a; });
+      sum = Math.round(Math.abs(sum) * 100) / 100; if (sum <= 0) return;
+      const cat = catCol ? _billNormCat(catCol, "支出") : "其他";
+      out.push({ id: uid(), date, type: _billTypeOf(cat, typeCol), cat, amount: sum, note: noteCol || "" });
+    } else {
+      amtIdxs.forEach((i) => {
+        const a = parseFloat(String(c[i] || "").replace(/[^\d.\-]/g, "")); if (!isFinite(a) || a === 0) return;
+        const cat = (D._billCatMap && D._billCatMap[i]) ? D._billCatMap[i] : _billNormCat(head[i], "支出");
+        const note = [head[i], noteCol].filter(Boolean).join(" · ");
+        out.push({ id: uid(), date, type: _billTypeOf(cat, typeCol), cat, amount: Math.round(Math.abs(a) * 100) / 100, note });
+      });
+    }
   });
-  if (!out.length) return toast("未解析到有效条目（日期需 YYYY-MM-DD）");
-  D._billPreview = out;
-  $("#bill-preview").innerHTML = `<div style="text-align:left;max-height:200px;overflow:auto">
-    <div style="font-size:12px;color:var(--text2);margin-bottom:6px">识别到 ${out.length} 条：</div>
-    ${out.slice(0, 50).map((o) => `<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)">${o.date} · ${o.type === "in" ? "收入" : "支出"} · ${esc(o.cat)} · ¥${o.amount} ${o.note ? "· " + esc(o.note) : ""}</div>`).join("")}
-    ${out.length > 50 ? '<div style="font-size:12px;color:var(--text2)">…仅显示前 50 条</div>' : ""}
-    </div><button class="btn" style="margin-top:10px;width:100%" onclick="confirmBillImport()">✅ 确认导入 ${out.length} 条</button>`;
+  return out;
 }
-function confirmBillImport() { const out = D._billPreview || []; if (!out.length) return; D.money = D.money.concat(out); save(); toast("已导入 " + out.length + " 条"); closeModal(); if (cur === "money") renderMoney(); }
+function renderBillPreview() {
+  const out = _billBuildEntries();
+  if (!out.length) { const el = $("#bill-preview"); if (el) el.innerHTML = `<div style="font-size:12px;color:var(--text2);margin-top:8px">未解析到有效条目（需有「日期」列，支持 YYYY-MM-DD / MM-DD / M.D 等写法）</div>`; D._billPreview = []; return; }
+  const exist = D.money || [];
+  let dup = 0;
+  const shown = out.filter((o) => {
+    const hit = exist.some((e) => e.date === o.date && Math.abs(e.amount - o.amount) < 0.005 && e.cat === o.cat && (e.note || "") === (o.note || ""));
+    if (hit) { dup++; return false; } return true;
+  });
+  D._billPreview = shown;
+  $("#bill-preview").innerHTML = `<div style="text-align:left;max-height:220px;overflow:auto;margin-top:8px">
+    <div style="font-size:12px;color:var(--text2);margin-bottom:6px">识别到 <b>${out.length}</b> 条${dup ? `，其中 <b style="color:var(--orange)">${dup}</b> 条与现有重复将跳过` : ""}：</div>
+    ${shown.slice(0, 60).map((o) => `<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)">${o.date} · ${o.type === "收入" ? "收入" : "支出"} · <span class="tag hi">${esc(o.cat)}</span> · ¥${o.amount}${o.note ? ` · ${esc(o.note)}` : ""}</div>`).join("")}
+    ${shown.length > 60 ? '<div style="font-size:12px;color:var(--text2)">…仅显示前 60 条</div>' : ""}
+    </div><button class="btn" style="margin-top:10px;width:100%" onclick="confirmBillImport()">✅ 确认导入 ${shown.length} 条</button>`;
+}
+function applyBillTpl(idx) {
+  if (idx === "" || idx == null) return;
+  const t = (D.billTemplates || [])[+idx]; if (!t) return;
+  D._billRoles = (t.roles || []).slice();
+  D._billCatMap = JSON.parse(JSON.stringify(t.catMap || {}));
+  D._billHead = (t.header || "").split(",");
+  const ms = $("#bill-mode"); if (ms && t.mode) ms.value = t.mode;
+  const ta = $("#bill-csv");
+  if (ta && ta.value.trim()) parseBillCsv();
+  toast("已套用模板：" + t.name);
+}
+function saveBillTpl() {
+  const p = _billParseToCols(); if (!p) return;
+  const name = ($("#bill-tpl-name") && $("#bill-tpl-name").value.trim()) || "我的手动记账表";
+  if (!D.billTemplates) D.billTemplates = [];
+  D.billTemplates.push({ name, header: (D._billHead || p.head).join(","), roles: (D._billRoles || p.roles.map((r) => r || "忽略")), catMap: D._billCatMap || {}, mode: ($("#bill-mode") && $("#bill-mode").value) || "split" });
+  save();
+  toast("已保存识别模板：" + name);
+  openBillImport();
+}
+function confirmBillImport() {
+  let out = (D._billPreview || []).filter((o) => o.type === "收入" || o.type === "支出");
+  if (!out.length) return toast("没有可导入的条目");
+  const exist = D.money || [];
+  out = out.filter((o) => !exist.some((e) => e.date === o.date && Math.abs(e.amount - o.amount) < 0.005 && e.cat === o.cat && (e.note || "") === (o.note || "")));
+  if (!out.length) return toast("全部重复，未导入");
+  D.money = D.money.concat(out);
+  save();
+  toast("已导入 " + out.length + " 条");
+  closeModal();
+  if (cur === "money") renderMoney();
+}
+
 function openAiReceipt() {
   if (!aiReady()) { toast("请先在设置配置 AI 接口"); showSetupGuide("ai"); return; }
   openModal(`<h3>🤖 AI 识票</h3><p class="tool-sub">粘贴小票文字或截图 OCR 结果，AI 自动拆成记账条目。</p>
