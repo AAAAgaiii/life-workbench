@@ -2453,52 +2453,113 @@ function delXhsNote(id) {
 /* ---------- CSV 导入 ---------- */
 function xhsImportCsv() {
   openModal(`<h3>⬆ 导入 CSV</h3>
-    <p class="muted">粘贴从小红书导出的 CSV（表头：title,author,likes,category,url,tags,date,memo,desc）。无分类的行按标题关键词自动归类，归不到的进「默认」。</p>
-    <textarea id="xhs-csv" class="inp" rows="8" placeholder="title,author,likes,category,url,tags,date,memo,desc"></textarea>
+    <p class="muted">粘贴 CSV 或直接从 Excel/WPS 复制粘贴均可（支持英文/中文表头、Tab 分隔、无表头自动识别）。无分类的行按标题关键词自动归类，归不到的进「默认」。</p>
+    <textarea id="xhs-csv" class="inp" rows="8" placeholder="支持三种方式：① 粘贴标准 CSV（表头 title,author,likes,category,url,tags,date,memo,desc）② 直接从 Excel/WPS 里 Ctrl+A 复制粘贴（中文表头、Tab 分隔均可）③ 无表头时自动按内容识别链接/点赞/标题列"></textarea>
     <div style="display:flex;gap:8px;margin-top:6px">
       <button class="btn" onclick="xhsDoImport()">导入</button>
       <button class="btn gray" onclick="closeModal()">取消</button>
     </div>`);
 }
 function xhsParseCsv(text) {
+  text = String(text || "").replace(/^\uFEFF/, "");
   const lines = text.replace(/\r/g, "").split("\n").filter((l) => l.trim() !== "");
   if (!lines.length) return [];
+  // 分隔符自动识别：首行含 Tab（从 Excel 复制粘贴）用 Tab，否则用逗号
+  const delim = lines[0].indexOf("\t") >= 0 ? "\t" : ",";
   const splitLine = (line) => {
     const out = []; let cur = ""; let q = false;
     for (let i = 0; i < line.length; i++) {
       const ch = line[i];
       if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
-      else { if (ch === ",") { out.push(cur); cur = ""; } else if (ch === '"') q = true; else cur += ch; }
+      else { if (ch === delim) { out.push(cur); cur = ""; } else if (ch === '"') q = true; else cur += ch; }
     }
     out.push(cur); return out;
   };
   const rows = lines.map(splitLine);
-  let start = 0;
-  const head = rows[0].map((h) => h.trim().toLowerCase());
-  if (head.includes("title") || head.includes("author")) start = 1;
+  // 表头别名：兼容中文表头（抓取工具 / Excel 常见列名）
+  const ALIAS = {
+    "标题": "title", "题目": "title", "名称": "title", "笔记标题": "title",
+    "作者": "author", "博主": "author", "昵称": "author", "用户名": "author",
+    "点赞": "likes", "点赞数": "likes", "赞": "likes", "热度": "likes",
+    "分类": "category", "类别": "category",
+    "链接": "url", "地址": "url", "网址": "url",
+    "标签": "tags",
+    "日期": "date", "时间": "date", "发布时间": "date", "收藏时间": "date",
+    "备注": "memo", "批注": "memo", "笔记": "memo", "说明": "memo",
+    "描述": "desc", "摘要": "desc", "简介": "desc", "内容": "desc",
+  };
+  const norm = (h) => { const k = String(h || "").trim().toLowerCase(); return ALIAS[k] || k; };
+  let start = 1;
+  let head = rows[0].map(norm);
+  const hasHead = head.includes("title") || head.includes("author");
+  let noHead = false;
+  if (!hasHead) { noHead = true; start = 0; head = []; }
   const idx = (...names) => { for (const nm of names) { const i = head.indexOf(nm); if (i >= 0) return i; } return -1; };
   const iTitle = idx("title"), iAuthor = idx("author"), iLikes = idx("likes"),
     iCat = idx("category", "cat"), iUrl = idx("url", "link"), iTags = idx("tags"),
     iDate = idx("date"), iMemo = idx("memo", "批注", "笔记"), iDesc = idx("desc", "摘要"), iId = idx("id");
+  const parseLikes = (s) => {
+    s = String(s || "").trim().replace(/[,+\s]/g, "");
+    let m = s.match(/^([\d.]+)万$/); if (m) return Math.round(parseFloat(m[1]) * 10000);
+    m = s.match(/^([\d.]+)w$/i); if (m) return Math.round(parseFloat(m[1]) * 10000);
+    const n = Number(s); return isFinite(n) ? Math.round(n) : 0;
+  };
+  // 无表头模式：按单元格内容特征猜列（URL 列、纯数字列、首个文本列）
+  const guessRow = (c) => {
+    const cells = c.map((x) => String(x || "").trim());
+    const used = new Set();
+    let gUrl = "", gLikes = 0, gTitle = "", gAuthor = "", gDate = "";
+    cells.forEach((x, i) => {
+      if (!x || used.has(i)) return;
+      if (!gUrl && /^https?:\/\//i.test(x)) { gUrl = x; used.add(i); return; }
+      if (!gDate && /^\d{4}[-/.年]\d{1,2}[-/.月]/.test(x)) { gDate = x; used.add(i); return; }
+      if (!gLikes && /^[\d,.]+[万w]?$/i.test(x) && parseLikes(x) > 0) { gLikes = parseLikes(x); used.add(i); return; }
+    });
+    for (let i = 0; i < cells.length; i++) {
+      if (used.has(i) || !cells[i]) continue;
+      if (!gTitle) { gTitle = cells[i]; used.add(i); continue; }
+      if (!gAuthor && cells[i].length <= 30) { gAuthor = cells[i]; used.add(i); }
+      break;
+    }
+    return { title: gTitle, author: gAuthor, likes: gLikes, url: gUrl, date: gDate, cat: "", tags: "", memo: "", desc: "" };
+  };
   const now = Date.now();
   const out = [];
   for (let r = start; r < rows.length; r++) {
     const c = rows[r];
-    const title = (iTitle >= 0 ? c[iTitle] : "") || "";
-    if (!title.trim()) continue;
-    const rawCat = iCat >= 0 ? (c[iCat] || "").trim() : "";
-    const csvId = (iId >= 0 && c[iId] && String(c[iId]).trim()) ? String(c[iId]).trim() : "";
+    let f = {};
+    if (noHead) {
+      f = guessRow(c);
+    } else {
+      const title = (iTitle >= 0 ? c[iTitle] : "") || "";
+      if (!title.trim()) continue;
+      const rawCat = iCat >= 0 ? (c[iCat] || "").trim() : "";
+      const csvId = (iId >= 0 && c[iId] && String(c[iId]).trim()) ? String(c[iId]).trim() : "";
+      f = {
+        id: csvId || "",
+        title: title.trim(),
+        author: iAuthor >= 0 ? (c[iAuthor] || "").trim() : "",
+        likes: parseLikes(iLikes >= 0 ? c[iLikes] : ""),
+        cat: rawCat,
+        url: iUrl >= 0 ? (c[iUrl] || "").trim() : "",
+        tags: iTags >= 0 ? (c[iTags] || "").trim() : "",
+        date: iDate >= 0 ? (c[iDate] || "").trim() : "",
+        memo: iMemo >= 0 ? (c[iMemo] || "").trim() : "",
+        desc: iDesc >= 0 ? (c[iDesc] || "").trim() : "",
+      };
+    }
+    if (!f.title || !String(f.title).trim()) continue;
     out.push({
-      id: csvId || uid(),
-      title: title.trim(),
-      author: iAuthor >= 0 ? (c[iAuthor] || "").trim() : "",
-      likes: Number(iLikes >= 0 ? c[iLikes] : "") || 0,
-      cat: xhsResolveCat(rawCat, title.trim()),
-      url: iUrl >= 0 ? (c[iUrl] || "").trim() : "",
-      tags: iTags >= 0 ? (c[iTags] || "").trim() : "",
-      date: iDate >= 0 ? (c[iDate] || "").trim() : "",
-      memo: iMemo >= 0 ? (c[iMemo] || "").trim() : "",
-      desc: iDesc >= 0 ? (c[iDesc] || "").trim() : "",
+      id: f.id || uid(),
+      title: String(f.title).trim(),
+      author: f.author || "",
+      likes: f.likes || 0,
+      cat: xhsResolveCat(String(f.cat || "").trim(), String(f.title).trim()),
+      url: f.url || "",
+      tags: f.tags || "",
+      date: f.date || "",
+      memo: f.memo || "",
+      desc: f.desc || "",
       created: now, updatedAt: now,
     });
   }
