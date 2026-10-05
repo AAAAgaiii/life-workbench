@@ -211,19 +211,10 @@ label.fl { font-size: 12px; color: var(--text2); display: block; margin-bottom: 
 .streak-cell span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--text2); }
 .streak-cell.on span { color: #fff; }
 
-/* 热点 */
+/* 通用标签页（旅行/美食/SOP/购物/塔罗/道法等模块共用） */
 .hot-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
 .hot-tab { padding: 7px 14px; border-radius: 99px; background: var(--bg); font-size: 13px; color: var(--text2); }
 .hot-tab.active { background: var(--primary); color: #fff; }
-.hot-item { display: flex; gap: 10px; padding: 10px 2px; border-bottom: 1px solid var(--line); align-items: baseline; }
-.hot-item:last-child { border: none; }
-.hot-rank { font-weight: 800; font-style: italic; width: 24px; flex: none; color: #94a3b8; }
-.hot-item:nth-child(1) .hot-rank { color: var(--red); }
-.hot-item:nth-child(2) .hot-rank { color: var(--orange); }
-.hot-item:nth-child(3) .hot-rank { color: #eab308; }
-.hot-item a { color: var(--text); text-decoration: none; font-size: 14px; flex: 1; }
-.hot-item a:hover { color: var(--primary); }
-.hot-heat { font-size: 11px; color: var(--text2); flex: none; }
 
 /* 弹窗 & toast */
 .modal-bg {
@@ -839,7 +830,6 @@ body.compact .btn { padding: 7px 12px; }
     <section id="sec-money" class="section"></section>
     <section id="sec-assets" class="section"></section>
     <section id="sec-travel" class="section"></section>
-    <section id="sec-hot" class="section"></section>
     <section id="sec-wellness" class="section"></section>
     <section id="sec-tarot" class="section"></section>
     <section id="sec-tao" class="section"></section>
@@ -2742,7 +2732,6 @@ const defaultData = () => ({
   wellness: [],    // 养生知识 {id, date, tag, title, url, note}
   tarotDraws: [],  // 塔罗占卜 {id, date, card, upright, question, interpretation}
   taoDivinations: [], // 道法占卜 {id, date, method, result, question, interpretation}
-  poliNews: [],    // 时政新闻收藏 {id, date, title, url}
   stickers: [],    // 游戏化贴纸 {id, name, icon, module, date}
   moduleXp: { tarot: 0, tao: 0, wellness: 0, logic: 0, finance: 0 }, // 模块熟练度 XP
   dailyQuests: { date: "", tarot: false, tao: false, wellness: false, logic: false, finance: false }, // 每日任务完成状态
@@ -2834,7 +2823,7 @@ function pruneTombstones(t) {
   return t;
 }
 /* 轻量数据指纹：静默拉取后据此判断云端是否真带来了新内容，避免无谓重渲染与打扰 */
-const SYNC_ARR_FIELDS = ["todos", "schedule", "meals", "money", "study", "weights", "measurements", "dishes", "orders", "countdowns", "sops", "shopping", "trips", "travelHabits", "fixedExpenses", "habits", "amortItems", "xhsNotes", "xhsCats", "wellness", "tarotDraws", "taoDivinations", "poliNews", "stickers"];
+const SYNC_ARR_FIELDS = ["todos", "schedule", "meals", "money", "study", "weights", "measurements", "dishes", "orders", "countdowns", "sops", "shopping", "trips", "travelHabits", "fixedExpenses", "habits", "amortItems", "xhsNotes", "xhsCats", "wellness", "tarotDraws", "taoDivinations", "stickers"];
 function dataSig(d) {
   let s = "";
   SYNC_ARR_FIELDS.forEach((f) => {
@@ -3187,7 +3176,6 @@ const PAGES = [
   { id: "assets", name: "资产/净值", ico: "📈" },
   { id: "travel", name: "旅行计划", ico: "✈️" },
   { id: "xhs", name: "小红书库", ico: "📕" },
-  { id: "hot", name: "当日热点", ico: "🔥" },
   { id: "wellness", name: "养生知识", ico: "🍵" },
   { id: "tarot", name: "塔罗星盘", ico: "🔮" },
   { id: "tao", name: "道法学习", ico: "☯️" },
@@ -4383,94 +4371,6 @@ function addMoney() {
 }
 function delMoney(id) { tombstone(id); D.money = D.money.filter((x) => x.id !== id); save(); renderMoney(); }
 
-/* ================= 当日热点 ================= */
-let hotType = "wbHot";
-const HOT_TYPES = [["wbHot", "微博"], ["douyinHot", "抖音"], ["baiduRD", "百度"], ["zhihuHot", "知乎"], ["36Ke", "36氪"], ["political", "📰 时政"]];
-const POLI_SOURCES = [
-  {name:'央视新闻', url:'https://www.douyin.com/search/%E5%A4%AE%E8%A7%86%E6%96%B0%E9%97%BB'},
-  {name:'人民日报', url:'https://www.douyin.com/search/%E4%BA%BA%E6%B0%91%E6%97%A5%E6%8A%A5'},
-  {name:'新华网', url:'https://www.douyin.com/search/%E6%96%B0%E5%8D%8E%E7%BD%91'},
-  {name:'头条新闻', url:'https://www.douyin.com/search/%E5%A4%B4%E6%9D%A1%E6%96%B0%E9%97%BB'}
-];
-let hotCache = {};
-function renderHot() {
-  $("#sec-hot").innerHTML = `
-  <div class="card">
-    <div class="hot-tabs">${HOT_TYPES.map(([k, n]) => `<button class="hot-tab ${hotType === k ? "active" : ""}" onclick="hotType='${k}';renderHot()">${n}</button>`).join("")}
-      <span style="flex:1"></span><button class="btn sm ghost" onclick="delete hotCache['${hotType}'];renderHot()">↻ 刷新</button></div>
-    <div id="hot-list"><div class="empty">加载中…</div></div>
-  </div>`;
-  loadHot();
-}
-async function loadHot() {
-  const box = $("#hot-list");
-  if (hotCache[hotType]) { box.innerHTML = hotCache[hotType]; return; }
-  if (hotType === "political") {
-    const idx = Math.floor(Date.now() / 86400000) % POLI_SOURCES.length;
-    const featured = POLI_SOURCES[idx];
-    const user = D.poliNews || [];
-    const recent = user.slice().reverse();
-    const html = `
-    <div class="hot-item" style="background:var(--primary-soft);border-radius:10px;padding:12px">
-      <span class="hot-rank">📰</span>
-      <div style="flex:1">
-        <div style="font-weight:700;margin-bottom:6px">今日推荐 · ${esc(featured.name)}</div>
-        <a href="${safeUrl(featured.url)}" target="_blank" rel="noopener" style="color:var(--primary)">打开 ${esc(featured.name)} 短视频频道</a>
-      </div>
-    </div>
-    <div style="margin:14px 0 8px;font-weight:700">权威新闻入口</div>
-    ${POLI_SOURCES.map((s, i) => `<div class="hot-item"><span class="hot-rank">${i + 1}</span><a href="${safeUrl(s.url)}" target="_blank" rel="noopener">${esc(s.name)} 短视频频道</a></div>`).join("")}
-    <div style="margin:14px 0 8px;font-weight:700">我的时政收藏</div>
-    <div class="form-row" style="margin-bottom:10px">
-      <input id="poli-title" placeholder="标题" style="flex:2">
-      <input id="poli-url" placeholder="链接（抖音/ B站/ 小红书等）">
-      <button class="btn sm" onclick="addPoliNews()">+ 添加</button>
-    </div>
-    ${recent.length ? recent.map(x => `<div class="hot-item"><span class="hot-rank">📌</span><a href="${safeUrl(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a><button class="icon-btn" onclick="delPoliNews('${x.id}')">✕</button></div>`).join("") : '<div class="empty" style="padding:8px 0">暂无收藏，可添加今日关注的时政新闻</div>'}`;
-    hotCache[hotType] = html;
-    box.innerHTML = html;
-    return;
-  }
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(`https://api.vvhan.com/api/hotlist/${hotType}`, { signal: ctrl.signal });
-    clearTimeout(timer);
-    const j = await res.json();
-    if (!j.success || !j.data) throw new Error("no data");
-    const html = j.data.slice(0, 30).map((x, i) => `<div class="hot-item">
-      <span class="hot-rank">${i + 1}</span>
-      <a href="${esc(safeUrl(x.url || x.mobil_url))}" target="_blank" rel="noopener">${esc(x.title)}</a>
-      <span class="hot-heat">${esc(x.hot || "")}</span></div>`).join("");
-    hotCache[hotType] = html;
-    box.innerHTML = html;
-  } catch (e) {
-    box.innerHTML = `<div class="empty">热点加载失败（接口可能临时不可用）<br><br>
-      <a href="https://s.weibo.com/top/summary" target="_blank" style="color:var(--primary)">微博热搜</a> ·
-      <a href="https://www.douyin.com/hot" target="_blank" style="color:var(--primary)">抖音热榜</a> ·
-      <a href="https://top.baidu.com/board" target="_blank" style="color:var(--primary)">百度热搜</a></div>`;
-  }
-}
-function addPoliNews() {
-  const title = $("#poli-title").value.trim();
-  const url = $("#poli-url").value.trim();
-  if (!title || !url) return toast("请输入标题和链接");
-  if (!D.poliNews) D.poliNews = [];
-  D.poliNews.push({ id: uid(), date: todayStr(), title, url });
-  save();
-  delete hotCache.political;
-  loadHot();
-  toast("已添加时政收藏");
-}
-function delPoliNews(id) {
-  tombstone(id);
-  if (!D.poliNews) D.poliNews = [];
-  D.poliNews = D.poliNews.filter(x => x.id !== id);
-  save();
-  delete hotCache.political;
-  loadHot();
-}
-
 /* ---------- 新增模块常量 ---------- */
 const WELLNESS_TAGS = ['饮食养生','作息调养','运动保健','节气养生','四季调理','情志养生','穴位按摩'];
 const WELLNESS_TIPS = [
@@ -5650,7 +5550,7 @@ function guideInstall() {
   const mob = `<div class="guide-step"><span class="n">A</span><span class="ico">🤖</span><div class="body"><b>Android（Chrome / Edge / 华为浏览器）</b>：点右上角 ⋮ → <b>“安装应用”</b> 或“添加到主屏幕” → 确认。出现「⚡ 一键安装」时直接点即可。</div></div>
     <div class="guide-step"><span class="n">B</span><span class="ico">🍎</span><div class="body"><b>iPhone / iPad（Safari）</b>：点底部 <b>分享 ⬆︎</b> → 选 <b>“添加到主屏幕”</b> → 确认名称后“添加”。从桌面图标打开即全屏。</div></div>`;
   const pc = `<div class="guide-step"><span class="n">A</span><span class="ico">🪟</span><div class="body"><b>安装为桌面应用</b>：Chrome / Edge 中点地址栏右侧 <b>⊕“安装”</b> 图标，或菜单 → “安装工作台”，变成独立窗口、可固定任务栏（有「⚡ 一键安装」时直接点）。</div></div>
-    <div class="guide-step"><span class="n">B</span><span class="ico">📦</span><div class="body"><b>下载离线版（单文件）</b>：下载 <code>standalone.html</code>，双击即可离线打开，不依赖网络（热点 / AI 等联网功能除外），可拷到任意电脑随身用。</div></div>`;
+    <div class="guide-step"><span class="n">B</span><span class="ico">📦</span><div class="body"><b>下载离线版（单文件）</b>：下载 <code>standalone.html</code>，双击即可离线打开，不依赖网络（AI 等联网功能除外），可拷到任意电脑随身用。</div></div>`;
   return `
   <h3>📲 应用下载 / 安装 · 图文指引</h3>
   <div class="guide-fig">${fig}<div class="guide-cap">图：把网页工作台“安装”成手机 App 或 PC 桌面应用</div></div>
@@ -7738,7 +7638,7 @@ function decideTodoRoll() {
 const RENDER = {
   dashboard: renderDashboard, todo: renderTodo, schedule: renderSchedule,
   calendar: renderCalendar, diet: renderDiet, money: renderMoney,
-  hot: renderHot, wellness: renderWellness, tarot: renderTarot, tao: renderTao,
+  wellness: renderWellness, tarot: renderTarot, tao: renderTao,
   study: renderStudy, plan: renderPlan,
   weight: renderWeight, settings: renderSettings,
   kitchen: renderKitchen, sop: renderSop, shopping: renderShopping,
@@ -8596,7 +8496,7 @@ function openDownloadModal() {
         </div>
         <div class="card" style="box-shadow:none">
           <h3 style="font-size:15px">📦 下载离线版（单文件）</h3>
-          <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-bottom:10px">下载一个 <b>standalone.html</b> 单文件，双击即可离线打开，不依赖网络（热点/AI 等联网功能除外）。</div>
+          <div style="font-size:13px;color:var(--text2);line-height:1.8;margin-bottom:10px">下载一个 <b>standalone.html</b> 单文件，双击即可离线打开，不依赖网络（AI 等联网功能除外）。</div>
           <button class="btn" onclick="downloadStandalone()">⬇ 下载 standalone.html</button>
         </div>
       </div>
