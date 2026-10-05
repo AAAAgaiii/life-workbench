@@ -2453,12 +2453,31 @@ function delXhsNote(id) {
 /* ---------- CSV 导入 ---------- */
 function xhsImportCsv() {
   openModal(`<h3>⬆ 导入 CSV</h3>
-    <p class="muted">粘贴 CSV 或直接从 Excel/WPS 复制粘贴均可（支持英文/中文表头、Tab 分隔、无表头自动识别）。无分类的行按标题关键词自动归类，归不到的进「默认」。</p>
-    <textarea id="xhs-csv" class="inp" rows="8" placeholder="支持三种方式：① 粘贴标准 CSV（表头 title,author,likes,category,url,tags,date,memo,desc）② 直接从 Excel/WPS 里 Ctrl+A 复制粘贴（中文表头、Tab 分隔均可）③ 无表头时自动按内容识别链接/点赞/标题列"></textarea>
+    <p class="muted">支持两种来源：① 点「选择文件」直接选你的 .csv 导出文件；② 或从 Excel/WPS 里 Ctrl+A 复制粘贴。三种表头均兼容（英文 title,author… / 中文 标题,作者… / 无表头自动识别）。无分类的行按标题关键词自动归类，归不到的进「默认」。</p>
+    <div style="display:flex;align-items:center;gap:8px;margin:8px 0">
+      <label class="btn" style="cursor:pointer">📂 选择文件<input id="xhs-csv-file" type="file" accept=".csv,text/csv" style="display:none" onchange="xhsReadCsvFile(this)"></label>
+      <span class="muted" id="xhs-csv-name"></span>
+    </div>
+    <textarea id="xhs-csv" class="inp" rows="8" placeholder="把 CSV 内容粘贴到这里，或直接选文件自动填充…"></textarea>
     <div style="display:flex;gap:8px;margin-top:6px">
       <button class="btn" onclick="xhsDoImport()">导入</button>
       <button class="btn gray" onclick="closeModal()">取消</button>
     </div>`);
+}
+function xhsReadCsvFile(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const nameEl = $("#xhs-csv-name");
+  if (nameEl) nameEl.textContent = "读取中… " + f.name;
+  const reader = new FileReader();
+  reader.onload = () => {
+    $("#xhs-csv").value = reader.result || "";
+    if (nameEl) nameEl.textContent = "已载入 " + f.name;
+    const n = (reader.result || "").split(/\r\n|\n/).filter((x) => x.trim()).length - 1;
+    toast(n > 0 ? "已读取 " + n + " 行，点「导入」即可" : "文件似乎是空的");
+  };
+  reader.onerror = () => { if (nameEl) nameEl.textContent = "读取失败"; toast("文件读取失败"); };
+  reader.readAsText(f, "utf-8");
 }
 function xhsParseCsv(text) {
   text = String(text || "").replace(/^\uFEFF/, "");
